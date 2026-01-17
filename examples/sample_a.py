@@ -1,50 +1,52 @@
-import os
-import json
-
-class MathTool:
-    """A simple math tool."""
-
-    def add(self, a, b):
-        return a + b
-
-    def multiply(self, a, b):
-        return a * b
-
-
-def save_number(num, file_path):
+def add_numbers(a, b):
     """
-    Save a number to a file.
+    A function that adds two numbers but does not return the result.
+    
+    Args:
+        a (Any): The first number to add.
+        b (Any): The second number to add.
+    """
+    return a + b
+
+def greet(name="Guest"):
+    """
+    A Python function named greet that takes one argument and does not return any value.
+    
+    Parameters
+    ----------
+    name : Any
+        The name to be used in the greeting.
+    """
+    return f"Hello, {name}!"
+
+def get_stats(numbers):
+    """
+    Calculate statistics from a list of numbers.
     
     A more detailed description of the function, if necessary.
     
-    :param num: The number to be saved.
-    :type num: int
-    :param file_path: The path to the file where the number will be saved.
-    :type file_path: str
-    :returns: None
-    :rtype: None
-    :raises: {}
+    Parameters
+    ----------
+    numbers : list
+        A list of numbers to calculate statistics from.
+    
+    Returns
+    -------
+    None
+        None
     """
     
-    
-    pass
+    return min(numbers), max(numbers)
 
-
-def load_number(file_path):
+def factorial(n):
     """
-    Load a number from a file.
+    Calculates the factorial of a given number
     
-    A more detailed description of the function, if necessary.
-    
-    :param file_path: Path to the file containing the number.
-    :type file_path: str
-    :returns: None
-    :rtype: None
+    Parameters
+    ----------
+    n : Any
+        The number to calculate the factorial of
     """
-    
-    if not os.path.exists(file_path):
-        return None
-
-    with open(file_path, "r") as f:
-        data = json.load(f)
-        return data.get("value")
+    if n == 0:
+        return 1
+    return n * factorial(n - 1)

@@ -7,7 +7,7 @@ import os
 import tempfile
 import pandas as pd
 
-from dashboard.dashboard_app import get_functions, dashboard
+from dashboard.dashboard import get_functions, dashboard
 
 
 def create_temp_py(code: str):
@@ -19,10 +19,10 @@ def create_temp_py(code: str):
 
 def test_get_functions_with_docstring():
     code = '''
-def add(a, b):
-    """Add two numbers"""
-    return a + b
-'''
+        def add(a, b):
+            """Add two numbers"""
+            return a + b
+        '''
     path = create_temp_py(code)
     rows = get_functions(path)
 

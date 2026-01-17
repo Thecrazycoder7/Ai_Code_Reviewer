@@ -1,47 +1,66 @@
 import ast
-from typing import List, Dict
+import os
+from typing import Any, List, Dict
 import autopep8
 import pydocstyle
+import streamlit as st
+from radon.complexity import cc_visit
+from radon.metrics import mi_visit
 
-def compute_complexity(file_path: str) -> Dict[str, int]:
-    """
-    Compute cyclomatic complexity for functions in a Python file.
-    Returns a dictionary mapping function names to their complexity scores.
-    """
-    from radon.complexity import cc_visit
-
-    complexities = {}
+# --- METRIC FUNCTIONS ---
+def compute_complexity_from_string(code: str) -> dict:
+    """Analyze code string directly to avoid path issues."""
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            code = f.read()
-
         analysis = cc_visit(code)
-        for item in analysis:
-            if item.is_function:
-                complexities[item.name] = item.complexity
+        if not analysis:
+            return {"info": "No functions found"}
+        return {item.name: item.complexity for item in analysis if item.is_function}
+    except Exception as e:
+        return {"error": str(e)}
 
-    except Exception:
-        pass  # In case of error, return empty dict
+import ast
+from radon.complexity import cc_visit
+from radon.metrics import mi_visit
 
-    return complexities
-
-def compute_maintainability(file_path: str) -> float:
-    """
-    Compute maintainability index for a Python file.
-    Returns the maintainability index as a float.
-    """
-    from radon.metrics import mi_visit
-
+def summarize_complexity(code: str) -> dict:
+    """Analyze complexity directly from a string of code."""
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            code = f.read()
+        # cc_visit returns a list of Function objects
+        analysis = cc_visit(code)
+        
+        if not analysis:
+            return {"info": "No functions found"}
 
-        mi_score = mi_visit(code, True)
-        return mi_score
+        # Filter only for functions/methods
+        complexity_map = {item.name: item.complexity for item in analysis if hasattr(item, 'complexity')}
+        
+        if not complexity_map:
+            return {"info": "No functions found"}
 
-    except Exception:
-        return -1.0  # Indicate failure to compute
-    
+        values = list(complexity_map.values())
+        max_val = max(values)
+        
+        return {
+            "total_functions": len(values),
+            "average_complexity": round(sum(values) / len(values), 2),
+            "max_complexity": max_val,
+            "risk_level": "Low" if max_val <= 5 else "Medium" if max_val <= 10 else "High",
+            "per_function": complexity_map
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+def compute_maintainability_single(code: str) -> dict:
+    """Computes Maintainability Index from a string of code."""
+    try:
+        # mi_visit returns a score (0-100)
+        mi_score = mi_visit(code, multi=True)
+        return {
+            "score": round(mi_score, 2),
+            "status": "Good" if mi_score >= 70 else "Average" if mi_score >= 50 else "Poor"
+        }
+    except Exception as e:
+        return {"score": 0, "status": "Error"}
     
 def validate_file(file_path: str) -> Dict:
     """
@@ -124,7 +143,8 @@ def validate_docstrings(file_path):
             lines = f.readlines()
 
         for i, line in enumerate(lines, start=1):
-            if line.strip().startswith("def ") and '"""' not in lines[i]:
+            if line.strip().startswith("def ") and i < len(lines) and '"""' not in lines[i]:
+
                 violations.append({
                     "code": "D103",
                     "line": i,

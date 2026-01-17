@@ -1,3 +1,4 @@
+from click import style
 import streamlit as st
 import os
 import ast
@@ -6,129 +7,116 @@ import altair as alt
 import json
 
 from core.reporter.coverage_reporter import compute_coverage, write_report
-
-from dashboard.dashboard_app import dashboard
+from dashboard.dashboard import dashboard
 from core.parser.python_parser import parse_path
-from core.validator.validator import validate_docstrings, compute_complexity, compute_maintainability
-# from core.metrics.maintainability import compute_maintainability
-from core.docstring_engine.generator import (
-    json_to_google_docstring,
-    json_to_numpy_docstring,    
-    json_to_rest_docstring,
-    analyze_file_with_groq,
-    analyze_function_with_groq,
-)
+from core.validator.validator import summarize_complexity, validate_docstrings, compute_maintainability_single
+from core.docstring_engine.groq_integration import generate_placeholder_docstring
 # ------------------ PAGE CONFIG ------------------
 st.set_page_config(page_title="AI Code Reviewer", layout="wide", page_icon="🔍")
 
 # ------------------ CUSTOM CSS ------------------
 st.markdown("""
-<style>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        .stApp { background-color: #F8FAFC; font-family: 'Inter', sans-serif; }
+        .main-header {
+            background: linear-gradient(90deg, #4F46E5 0%, #7C3AED 100%);
+            padding: 1rem; border-radius: 12px; color: white;
+            margin-bottom: 2rem; box-shadow: 0 4px 20px rgba(79, 70, 229, 0.2);
+        }
+        .pro-pro-card {
+            background: white; padding: 1.2rem; border-radius: 16px;
+            border: 1px solid #E2E8F0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s ease;
+        }
+        .pro-pro-card:hover { transform: translateY(-5px); }
+        .stat-val { font-size: 2rem; font-weight: 700; color: #1E293B; }
+        .stat-label { color: #64748B; text-transform: uppercase; font-size: 0.75rem; font-weight: 600; }
+        .code-box {
+            border-radius: 14px;
+            padding: 14px;
+            background: white;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.06);
+        }
 
-/* ---------- GLOBAL ---------- */
-body {
-    background: linear-gradient(135deg, #f3f2ff, #faf9ff);
-    font-family: "Segoe UI", sans-serif;
-}
+        .before-box {
+            border-left: 6px solid #EF4444;
+        }
 
-/* ---------- SIDEBAR ---------- */
-section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #6c4dfc, #4b2fd6);
-    padding: 5px;
-}
+        .after-box {
+            border-left: 6px solid #10B981;
+        }
+        /* Sidebar background */
+        section[data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #7C3AED, #5B21B6);
+            color: white;
+        }
 
-section[data-testid="stSidebar"] h1,
-section[data-testid="stSidebar"] h2,
-section[data-testid="stSidebar"] p,
-section[data-testid="stSidebar"] label {
-    color: white !important;
-}
+        /* Sidebar title */
+        section[data-testid="stSidebar"] h1,
+        section[data-testid="stSidebar"] h2,
+        .sidebar-title {
+            color: white !important;
+            font-size: 24px;
+            font-weight: 700;
+        }
 
+        /* Radio labels (menu items) */
+        section[data-testid="stSidebar"] label {
+            color: #EDE9FE !important;   /* light white */
+            font-weight: 600;
+            padding: 8px 12px;
+            border-radius: 8px;
+        }
 
-/* ---------- PAGE CONTAINER ---------- */
-.main {
-    padding: 25px;
-}
+        /* Hover */
+        section[data-testid="stSidebar"] label:hover {
+            color: #FFFFFF !important;
+        }
 
-/* ---------- CARDS ---------- */
-.card {
-    background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
-    color: #111827;
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 12px 30px rgba(0,0,0,0.12);
-    margin-bottom: 20px;
-    transition: 0.3s ease;
-}
+        /* Selected item */
+        section[data-testid="stSidebar"] input:checked + div {
+            color: #FFFFFF !important;
+            font-weight: 700;
+        }
 
-.card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 18px 40px rgba(0,0,0,0.18);
-}
-
-/* ---------- METRIC CARDS ---------- */
-.metric {
-    background: linear-gradient(135deg, #ede9ff, #f6f4ff);
-    padding: 18px;
-    border-radius: 16px;
-    text-align: center;
-    font-size: 18px;
-    font-weight: 600;
-    box-shadow: 0 8px 18px rgba(108,77,252,0.25);
-}
-
-/* ---------- BUTTONS ---------- */
-.stButton button {
-    background: linear-gradient(135deg, #6c4dfc, #4b2fd6);
-    color: white;
-    border-radius: 12px;
-    padding: 10px 18px;
-    font-weight: bold;
-    border: none;
-    box-shadow: 0 6px 16px rgba(0,0,0,0.25);
-}
-
-.stButton button:hover {
-    transform: scale(1.05);
-    background: linear-gradient(135deg, #7d66ff, #563de6);
-}
-
-/* ---------- INPUTS ---------- */
-input, textarea, select {
-    border-radius: 10px !important;
-    padding: 8px !important;
-}
-
-/* ---------- TABS ---------- */
-.stTabs [data-baseweb="tab"] {
-    background: #ede9ff;
-    border-radius: 12px;
-    margin-right: 6px;
-    padding: 10px 18px;
-    font-weight: 600;
-}
-
-.stTabs [aria-selected="true"] {
-    background: #6c4dfc;
-    color: white;
-}
-
-/* ---------- TABLE ---------- */
-.dataframe {
-    border-radius: 14px;
-    overflow: hidden;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-}
-
-/* ---------- CODE BLOCK ---------- */
-pre {
-    border-radius: 5px;
-    background: #1e1e2f;
-    color: #f8f8f2;
-}
-
-</style>
+        /* Upload text */
+        section[data-testid="stSidebar"] p,
+        section[data-testid="stSidebar"] span {
+            color: #EDE9FE !important;
+        }
+        .stat-val { font-size: 2rem; font-weight: 700; color: #1E293B; }
+        .stat-label { color: #64748B; text-transform: uppercase; font-size: 0.75rem; font-weight: 600; }
+    </style>
 """, unsafe_allow_html=True)
+
+def stat_card(title, value, color):
+            return f"""
+            <div style="
+                background: white;
+                padding: 16px 18px;
+                border-radius: 10px;
+                border-left: 4px solid {color};
+                box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+            ">
+                <div style="
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: #64748B;
+                    letter-spacing: 0.04em;
+                ">
+                    {title}
+                </div>
+                <div style="
+                    font-size: 30px;
+                    font-weight: 700;
+                    color: #0F172A;
+                    margin-top: 6px;
+                ">
+                    {value}
+                </div>
+            </div>
+            """
 
 total = documented = coverage = 0
 # ------------------ HELPERS ------------------
@@ -151,32 +139,53 @@ def save_code_to_file(file_name: str, code: str):
 def clean_code(code: str) -> str:
     return "\n".join(line for line in code.splitlines() if not line.strip().startswith("```"))
 
-def insert_docstring_clean(code, node, docstring_text):
-    try:
-        lines = code.split("\n")
-        # Remove old docstring
-        if node.body and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, (ast.Str, ast.Constant)):
-            doc_node = node.body[0]
-            lines[doc_node.lineno-1:doc_node.end_lineno] = []
-        # Insert new docstring
-        def_line_idx = node.lineno-1
-        indent = " "*(node.col_offset+4)
-        doc_lines = [f'{indent}"""'] + [f"{indent}{line}" for line in docstring_text.split("\n")] + [f'{indent}"""']
-        lines[def_line_idx+1:def_line_idx+1] = doc_lines
-        return "\n".join(lines)
-    except Exception as e: st.error(f"Error inserting docstring: {e}"); return code
+def insert_docstring_clean(code: str, node, docstring: str) -> str:
+    lines = code.splitlines()
+    
+    # 1. Identify where to start and end removal of old docstring
+    start_line = node.lineno # This is the 'def' line
+    body = node.body
+    
+    # 2. Check if the first statement in the body is already a docstring
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, (ast.Str, ast.Constant)):
+        # Remove the lines occupied by the existing docstring
+        old_ds_start = body[0].lineno - 1
+        old_ds_end = body[0].end_lineno
+        del lines[old_ds_start:old_ds_end]
+    
+    # 3. Calculate insertion point (immediately after the 'def' line)
+    # We use node.lineno because lines is 0-indexed and node.lineno is 1-indexed
+    insert_at = node.lineno 
+    indent = " " * (node.col_offset + 4)
 
+    # 4. Format with triple quotes correctly
+    doc_lines = [f'{indent}"""{line}"""' if len(docstring.splitlines()) == 1 else f'{indent}"""']
+    if len(docstring.splitlines()) > 1:
+        for line in docstring.splitlines():
+            doc_lines.append(f"{indent}{line}")
+        doc_lines.append(f'{indent}"""')
+
+    lines[insert_at:insert_at] = doc_lines
+    return "\n".join(lines)
 
 # ------------------ SESSION STATE ------------------
 for key in ["scanned","code","file_name","page","updated_code"]:
     if key not in st.session_state: st.session_state[key] = False if key=="scanned" else "" if key=="code" else None
 
 # ------------------ SIDEBAR ------------------
-st.sidebar.title("</> AI Reviewer")
-options = ["🏠 Home", "📝 Docstring", "✅ Validation", "📐 Metrics", "⚡Dashboard"]
-st.session_state.page = st.sidebar.radio("Navigate to", options, index=options.index(st.session_state.page) if st.session_state.page in options else 0)
+st.sidebar.markdown(
+    '<div class="sidebar-title">🖥️ AI Reviewer</div>',
+    unsafe_allow_html=True
+)
 
-uploaded_file = st.sidebar.file_uploader("Choose a Python file", type=["py"])
+options = ["🏠 Home", "📝 Docstring", "✅ Validation", "📐 Metrics", "⚡ Dashboard"]
+st.session_state.page = st.sidebar.radio(
+    "Navigation",
+    options,
+    label_visibility="collapsed"
+)
+
+uploaded_file = st.sidebar.file_uploader("Upload Python file", type=["py"])
 examples_folder = "examples"
 if uploaded_file:
     st.session_state.code = uploaded_file.read().decode("utf-8")
@@ -211,11 +220,11 @@ if st.session_state.scanned and st.session_state.file_name:
 page = st.session_state.page
 
 if page == "🏠 Home":
-    st.markdown(f"""
-            <h3 class="card" style="padding: 20px; margin-bottom: 30px; background: #6c4dfc; color: white;">
-                🏠 Home
-            </h3>
-         """, unsafe_allow_html=True)
+    st.markdown(
+    '<div class="main-header"><h1>⚡AI Code Reviewer</h1><p tyle="color: #A0AEC0;>Automatically check your code for errors, style, and best practices.</p></div>',
+    unsafe_allow_html=True
+)
+
     if not st.session_state.scanned:
         st.info("Upload or select a Python file.")
     else:
@@ -224,103 +233,130 @@ if page == "🏠 Home":
         coverage = int((documented/total)*100) if total else 0
         col1,col2,col3 = st.columns(3)
 
+        col1, col2, col3 = st.columns(3)
+
         with col1:
             st.markdown(
-                f"""
-                <div class="card">
-                    <h4>Total Functions</h4>
-                    <h2>{total}</h2>
-                </div>
-                """,
+                stat_card("TOTAL FUNCTIONS", total, "#6366F1"),
                 unsafe_allow_html=True
             )
 
         with col2:
             st.markdown(
-                f"""
-                <div class="card">
-                    <h4>Documented</h4>
-                    <h2>{documented}</h2>
-                </div>
-                """,
+                stat_card("DOCUMENTED", documented, "#10B981"),
                 unsafe_allow_html=True
             )
 
         with col3:
             st.markdown(
-                f"""
-                <div class="card">
-                    <h4>Coverage</h4>
-                    <h2>{coverage}%</h2>
-                </div>
-                """,
+                stat_card("COVERAGE", f"{coverage}%", "#F59E0B"),
                 unsafe_allow_html=True
             )
 
+        st.markdown("---")
         st.markdown(f"""
-            <h3 class="card" style="padding: 20px; margin-top: 30px; background: #6c4dfc; color: white;">
-                📄 Current Code
-            </h3>
-         """, unsafe_allow_html=True)
+                    <h3 class="pro-card" style="padding: 20px; margin-top: 30px; background: #6c4dfc; color: white;">
+                        📄 Current Code
+                    </h3>
+                """, unsafe_allow_html=True)
         st.code(st.session_state.updated_code or st.session_state.code, language="python")
-        
+                
 
 elif page == "📝 Docstring":
     st.markdown(f"""
-            <h3 class="card" style="padding: 20px; margin-bottom: 30px; background: #6c4dfc; color: white;">
-                📝 Docstring Review
+            <div class="main-header"><h3>
+                📝 Docstring
             </h3>
+            <p style="color: #A0AEC0;">Write clear descriptions for functions and classes to make code easier to understand.</p></div>
          """, unsafe_allow_html=True)
-    if not funcs: st.warning("No functions found."); st.stop()
-    current_code = st.session_state.updated_code or st.session_state.code
+
+    if not funcs:
+        st.warning("No functions found.")
+        st.stop()
+
+    current_code = st.session_state.get("updated_code", st.session_state.get("code", ""))
     tree = ast.parse(current_code)
     functions = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
     names = [f.name for f in functions]
-    if not names: st.warning("No functions found."); st.stop()
+
+    if not names:
+        st.warning("No functions found.")
+        st.stop()
 
     selected = st.selectbox("Select a function to review", names)
-    node = next((f for f in functions if f.name==selected), None)
-    if "last_selected" not in st.session_state or st.session_state.last_selected != selected:
+    node = next((f for f in functions if f.name == selected), None)
+
+    # Generate placeholder docstrings once per selection
+    if st.session_state.get("last_selected") != selected:
         st.session_state.last_selected = selected
-        with st.spinner("Generating docstrings..."):
-            raw_output = analyze_function_with_groq(node, current_code)
-            google_doc, numpy_doc, rest_doc = split_docstrings(raw_output)
-            st.session_state.google_doc = google_doc
-            st.session_state.numpy_doc = numpy_doc
-            st.session_state.rest_doc = rest_doc
+        fn_info = {
+            "name": node.name,
+            "args": [{"name": arg.arg, "annotation": ast.unparse(arg.annotation) if arg.annotation else None} for arg in node.args.args],
+            "returns": ast.unparse(node.returns) if node.returns else None,
+        }
 
-    google_doc = st.session_state.get("google_doc","No docstring generated")
-    numpy_doc = st.session_state.get("numpy_doc","No docstring generated")
-    rest_doc = st.session_state.get("rest_doc","No docstring generated")
+        st.session_state.google_doc = generate_placeholder_docstring(fn_info, "google")
+        st.session_state.numpy_doc  = generate_placeholder_docstring(fn_info, "numpy")
+        st.session_state.rest_doc   = generate_placeholder_docstring(fn_info, "rest")
 
-    col1,col2 = st.columns(2)
-    with col1: st.subheader("📖 Before"); st.code(ast.get_docstring(node) or "No docstring")
+    google_doc = st.session_state.get("google_doc", "No docstring generated")
+    numpy_doc  = st.session_state.get("numpy_doc", "No docstring generated")
+    rest_doc   = st.session_state.get("rest_doc", "No docstring generated")
+
+    # Show Before / After
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("""
+        <div class="code-box before-box"">
+            <h4>📖 Before</h4>
+        </div>
+        """, unsafe_allow_html=True)
+
+        before_code = ast.get_docstring(node) or "No docstring"
+        st.code(before_code, language="python")
+
     with col2:
-        st.subheader("✨ After")
-        tabs = st.tabs(["Google","NumPy","reST"])
-        with tabs[0]: st.code(google_doc)
-        with tabs[1]: st.code(numpy_doc)
-        with tabs[2]: st.code(rest_doc)
+        st.markdown("""
+        <div class="code-box after-box">
+            <h4>✨ After</h4>
+        </div>
+        """, unsafe_allow_html=True)
 
-    selected_style = st.selectbox("Choose style to apply", ["Google","NumPy","reST"])
-    accepted_doc = {"Google": google_doc, "NumPy": numpy_doc, "reST": rest_doc}.get(selected_style, google_doc)
+        tabs = st.tabs(["Google", "NumPy", "reST"])
+        with tabs[0]:
+            st.code(google_doc, language="python")
+        with tabs[1]:
+            st.code(numpy_doc, language="python")
+        with tabs[2]:
+            st.code(rest_doc, language="python")
 
-    colA,colB = st.columns(2)
-    with colA:
-        if st.button("✅ Accept & Apply"):
-            new_code = insert_docstring_clean(current_code, node, accepted_doc)
-            st.session_state.updated_code = new_code
-            st.session_state.code = new_code
-            save_code_to_file(st.session_state.file_name, new_code)
-            st.success("Docstring applied successfully!")
-            st.rerun()
-    with colB:
-        if st.button("❌ Reject"): st.info("Docstring rejected.")
+        # Select style to apply
+        st.markdown("---")
+        st.subheader("Select Docstring Style to Apply")
+        selected_style = st.selectbox("Choose style to apply", ["Google", "NumPy", "reST"])
+        accepted_doc = {"Google": google_doc, "NumPy": numpy_doc, "reST": rest_doc}.get(selected_style, google_doc)
+
+        # Accept / Reject buttons
+        colA, colB = st.columns(2)
+        with colA:
+            if st.button("✅ Accept"):
+                new_code = insert_docstring_clean(current_code, node, accepted_doc)
+                st.session_state.updated_code = new_code
+                st.session_state.code = new_code
+                save_code_to_file(st.session_state.file_name, new_code)
+                st.success("Docstring applied successfully!")
+                st.rerun()
+        with colB:
+            if st.button("❌ Reject"):
+                st.info("Docstring rejected.")
+
 elif page == "✅ Validation":
     st.markdown(f"""
-            <h3 class="card" style="padding: 20px; margin-bottom: 30px; background: #6c4dfc; color: white;">
+            <div class="main-header"><h3>
                 ✅ Validation
             </h3>
+            <p style="color: #A0AEC0;">Ensure your code works correctly and meets all requirements.</p></div>
          """, unsafe_allow_html=True)
     if not parsed_files:
         st.info("Please scan a file first.")
@@ -344,7 +380,22 @@ elif page == "✅ Validation":
         selected_file = st.session_state.get("validation_file")
         if selected_file:
             violations = validate_docstrings(selected_file)
+            
+            st.subheader("📊Compliance Overview")
+            c1, c2 = st.columns(2)
 
+            with c1:
+                st.markdown(
+                    stat_card("COMPLIANT", 1 if not violations else 0, "#10B981"),
+                    unsafe_allow_html=True
+                )
+
+            with c2:
+                st.markdown(
+                    stat_card("VIOLATIONS", len(violations), "#EF4444"),
+                    unsafe_allow_html=True
+                )
+            st.markdown("---")
             st.bar_chart({
                 "Compliant": 1 if not violations else 0,
                 "Violations": len(violations)
@@ -358,29 +409,71 @@ elif page == "✅ Validation":
                         f"{v['code']} (line {v['line']}): {v['message']}"
                     )
 
-
 elif page == "📐 Metrics":
-    st.markdown(f"""
-            <h3 class="card" style="padding: 20px; margin-bottom: 30px; background: #6c4dfc; color: white;">
-                📐 Metrics
-            </h3>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="main-header"><h1>📐 Code Quality Metrics</h1><p style="color: #A0AEC0;">Track code health, complexity, and performance to improve your projects.</p></div>',
+        unsafe_allow_html=True
+    )
 
-    if not parsed_files:
-        st.info("Run a scan first")
+    # Get latest code
+    current_code = st.session_state.get("updated_code") or st.session_state.get("code")
+
+    if not current_code or current_code.strip() == "":
+        st.info("The selected file is empty. Please upload code with functions (def).")
     else:
-        file_paths = [f["file_path"] for f in parsed_files]
-        selected_file = st.selectbox("Select File", file_paths)
+        # ---------------- MAINTAINABILITY ----------------
+        mi_data = compute_maintainability_single(current_code)
 
-        with open(selected_file, "r", encoding="utf-8") as f:
-            src = f.read()
+        col1, col2, col3 = st.columns(3)
 
-        st.metric("Maintainability Index", compute_maintainability(src))
-        st.json(compute_complexity(src))
+        with col1:
+            st.markdown(
+                stat_card(
+                    "MAINTAINABILITY",
+                    mi_data["score"],
+                    "#6366F1"
+                ),
+                unsafe_allow_html=True
+            )
 
+        # ---------------- COMPLEXITY ----------------
+        complexity = summarize_complexity(current_code)
 
+        if "per_function" in complexity:
+            with col2:
+                st.markdown(
+                    stat_card(
+                        "AVG COMPLEXITY",
+                        complexity["average_complexity"],
+                        "#F59E0B"
+                    ),
+                    unsafe_allow_html=True
+                )
 
-elif page == "⚡Dashboard":
+            with col3:
+                risk_color = "#EF4444" if complexity["risk_level"] == "High" else "#10B981"
+                st.markdown(
+                    stat_card(
+                        "RISK LEVEL",
+                        complexity["risk_level"],
+                        risk_color
+                    ),
+                    unsafe_allow_html=True
+                )
+
+            st.markdown("---")
+            st.subheader("📊 Function Breakdown")
+            st.json(complexity["per_function"])
+
+        else:
+            st.warning(f"⚠️ {complexity.get('info', 'Analysis Error')}")
+            if "error" in complexity:
+                st.error(f"Syntax Error: {complexity['error']}")
+
+            with st.expander("View Code"):
+                st.code(current_code, language="python")
+
+elif page == "⚡ Dashboard":
     dashboard()
 
 # -------------------------------------------------

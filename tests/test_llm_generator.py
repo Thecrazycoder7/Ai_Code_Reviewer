@@ -1,112 +1,79 @@
-"""
-Tests for Groq + AST integration
-"""
+import json
+import pytest
+from unittest.mock import patch, MagicMock
+from core.docstring_engine.groq_integration import generate_placeholder_docstring
+# ---------------- Sample input ----------------
+FN_INFO = {
+    "name": "add_numbers",
+    "args": ["a", "b"],
+    "returns": "int"
+}
 
-import ast
-from core.docstring_engine.generator import (
-    extract_func_info,
-    analyze_file_with_groq,
-    analyze_function_with_groq,
-)
+LLM_JSON = {
+    "summary": "Adds two numbers.",
+    "arg_descs": {
+        "a": "First number",
+        "b": "Second number"
+    },
+    "ret_desc": "Sum of numbers"
+}
 
+# ---------------- Test: Google style ----------------
+@patch("core.docstring_engine.groq_integration.client")
+@patch("core.docstring_engine.generator.to_google")
+def test_google_docstring_success(mock_to_google, mock_client):
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content=json.dumps(LLM_JSON)))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
 
-def test_extract_func_info_basic():
-    code = """
-def add(a, b) -> int:
-    return a + b
-"""
-    tree = ast.parse(code)
-    node = tree.body[0]
+    mock_to_google.return_value = "GOOGLE DOCSTRING"
 
-    info = extract_func_info(node)
+    result = generate_placeholder_docstring(FN_INFO, "google")
 
-    assert info["name"] == "add"
-    assert info["args"] == ["a", "b"]
-    assert info["returns"] == "int"
+    assert result == "GOOGLE DOCSTRING"
+    mock_to_google.assert_called_once()
 
+# ---------------- Test: NumPy style ----------------
+@patch("core.docstring_engine.groq_integration.client")
+@patch("core.docstring_engine.generator.to_numpy")
+def test_numpy_docstring_success(mock_to_numpy, mock_client):
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content=json.dumps(LLM_JSON)))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
 
-def test_extract_func_info_no_return():
-    code = """
-def hello(name):
-    print(name)
-"""
-    tree = ast.parse(code)
-    node = tree.body[0]
+    mock_to_numpy.return_value = "NUMPY DOCSTRING"
 
-    info = extract_func_info(node)
+    result = generate_placeholder_docstring(FN_INFO, "numpy")
 
-    assert info["name"] == "hello"
-    assert info["args"] == ["name"]
-    assert info["returns"] == "None"
+    assert result == "NUMPY DOCSTRING"
+    mock_to_numpy.assert_called_once()
 
+# ---------------- Test: reST style ----------------
+@patch("core.docstring_engine.groq_integration.client")
+@patch("core.docstring_engine.generator.to_rest")
+def test_rest_docstring_success(mock_to_rest, mock_client):
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content=json.dumps(LLM_JSON)))
+    ]
+    mock_client.chat.completions.create.return_value = mock_response
 
-def test_analyze_file_returns_string(monkeypatch):
-    def fake_response(*args, **kwargs):
-        class Fake:
-            choices = [type("obj", (), {"message": type("m", (), {"content": "File summary"})})]
-        return Fake()
+    mock_to_rest.return_value = "REST DOCSTRING"
 
-    monkeypatch.setattr(
-        "core.docstring_engine.groq_integration.client.chat.completions.create",
-        fake_response
-    )
+    result = generate_placeholder_docstring(FN_INFO, "rest")
 
-    result = analyze_file_with_groq("print('hello')")
-    assert isinstance(result, str)
-    assert len(result) > 0
+    assert result == "REST DOCSTRING"
+    mock_to_rest.assert_called_once()
 
+# ---------------- Test: LLM failure ----------------
+@patch("core.docstring_engine.groq_integration.client")
+def test_llm_failure_returns_error(mock_client):
+    mock_client.chat.completions.create.side_effect = Exception("LLM error")
 
-def test_analyze_file_handles_error(monkeypatch):
-    def fake_error(*args, **kwargs):
-        raise Exception("API error")
+    result = generate_placeholder_docstring(FN_INFO, "google")
 
-    monkeypatch.setattr(
-        "core.docstring_engine.groq_integration.client.chat.completions.create",
-        fake_error
-    )
-
-    result = analyze_file_with_groq("print('x')")
-    assert "Error" in result
-
-
-def test_analyze_function_returns_string(monkeypatch):
-    code = """
-def multiply(x, y):
-    return x * y
-"""
-    tree = ast.parse(code)
-    node = tree.body[0]
-
-    def fake_response(*args, **kwargs):
-        class Fake:
-            choices = [type("obj", (), {"message": type("m", (), {"content": "Docstring text"})})]
-        return Fake()
-
-    monkeypatch.setattr(
-        "core.docstring_engine.groq_integration.client.chat.completions.create",
-        fake_response
-    )
-
-    result = analyze_function_with_groq(node, code)
-    assert isinstance(result, str)
-    assert len(result) > 0
-
-
-def test_analyze_function_error_handling(monkeypatch):
-    code = """
-def bad(x):
-    return x
-"""
-    tree = ast.parse(code)
-    node = tree.body[0]
-
-    def fake_error(*args, **kwargs):
-        raise Exception("Groq failed")
-
-    monkeypatch.setattr(
-        "core.docstring_engine.groq_integration.client.chat.completions.create",
-        fake_error
-    )
-
-    result = analyze_function_with_groq(node, code)
-    assert "Error" in result
+    assert result == "Error generating docstring."
